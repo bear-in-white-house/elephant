@@ -26,7 +26,7 @@ SECRET_KEY = '6n!*3%&u+5kua8wv1li71tf@tt^$16^#wrkg%r663#chmb&&0!'
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ['*']
 
 
 # Application definition
@@ -40,24 +40,30 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
 ]
 
+START_APP = [
+    'account',
+    'config'
+]
+
 THIRD_APP = [
-    'djcelery'
 ]
 
 INSTALLED_APPS.extend(THIRD_APP)
+INSTALLED_APPS.extend(START_APP)
 
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql_psycopg2',
         'NAME': os.environ.get('POSTGRES_DB'),
         'USER': os.environ.get('POSTGRES_USER'),
-        'PASSWORD': os.environ.get('POSTGRES_PASS'),
+        'PASSWORD': os.environ.get('POSTGRES_PASSWORD'),
         'HOST': 'postgresql',
         'PORT': '5432'
     }
 }
 
 MIDDLEWARE = [
+    'elephant.middleware.RequestIdMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -88,17 +94,6 @@ TEMPLATES = [
 WSGI_APPLICATION = 'elephant.wsgi.application'
 
 
-# Database
-# https://docs.djangoproject.com/en/3.1/ref/settings/#databases
-
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
-    }
-}
-
-
 # Password validation
 # https://docs.djangoproject.com/en/3.1/ref/settings/#auth-password-validators
 
@@ -123,7 +118,7 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = 'en-us'
 
-TIME_ZONE = 'UTC'
+TIME_ZONE = 'Asia/Shanghai'
 
 USE_I18N = True
 
@@ -131,6 +126,25 @@ USE_L10N = True
 
 USE_TZ = True
 
+REDIS_HOST = os.environ.get('REDIS_HOST', 'redis')
+REDIS_CACHE_LOCATION = f'redis://{REDIS_HOST}:6379'
+
+# “django-redis” must be pip installed
+CACHES = {
+    'default': {
+        "BACKEND": 'redis_cache.RedisCache',
+        'LOCATION': REDIS_CACHE_LOCATION,
+        'TIMEOUT': 259200,
+        'OPTIONS': {
+            'COMPRESSOR': 'django_redis.compressors.zlib.ZlibCompressor',
+            'IGNORE_EXCEPTIONS': True,
+        }
+    },
+}
+
+SESSION_COOKIE_AGE = 60 * 60 * 24   # one day
+SESSION_SAVE_EVERY_REQUEST = True
+SESSION_ENGINE = 'django.contrib.sessions.backends.cache'
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/3.1/howto/static-files/
@@ -139,3 +153,74 @@ STATIC_ROOT = 'static'
 STATIC_URL = '/static/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'upload')
 MEDIA_URL = '/upload/'
+
+# celery
+CELERY_BROKER_URL = os.environ.get('BROKER_URL')
+CELERY_TIMEZONE = 'Asia/Shanghai'
+CELERYBEAT_SCHEDULER = 'djcelery.schedulers.DatabaseScheduler'
+CELERY_RESULT_BACKEND = 'rpc://'
+
+# 短信验证码类
+MSG_PROVIDER = 'elephant.utils.AliMsgCode'
+
+
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': (
+        'elephant.utils.authentications.ElephantAuthentication',
+    ),
+}
+
+
+log_level = 'DEBUG'
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'verbose': {
+            'format': '[%(asctime)s][%(name)s:%(lineno)s][%(levelname)s] %(message)s',
+            'datefmt': '%Y/%b/%d %H:%M:%S'
+        },
+        'colored': {
+            '()': 'colorlog.ColoredFormatter',
+            'format': '[%(log_color)s%(asctime)s%(reset)s][%(request_id)s][%(name)s:%(lineno)s][%(log_color)s%(levelname)s%(reset)s] %(message)s',
+            'datefmt': '%Y/%b/%d %H:%M:%S',
+            'log_colors': {
+                'DEBUG': 'cyan',
+                'INFO': 'green',
+                'WARNING': 'bold_yellow',
+                'ERROR': 'red',
+                'CRITICAL': 'red,bg_white'},
+            'secondary_log_colors': {},
+            'style': '%'}, },
+    'filters': {
+        'request_id': {'()': 'elephant.logging_filters.RequestIDFilter'}},
+    'handlers': {
+        'console': {
+            'level': log_level,
+            'class': 'logging.StreamHandler',
+            'formatter': 'colored',
+            'filters': ['request_id']},
+        'sls_handler': {'class': 'aliyun.log.QueuedLogHandler',
+                        'level': 'INFO',
+                         'formatter': 'colored',
+                         # custom args:
+                         'end_point': os.environ.get('ALIYUN_LOG_SAMPLE_ENDPOINT'),
+                         'access_key_id': os.environ.get('ALIYUN_LOG_SAMPLE_ACCESSID'),
+                         'access_key': os.environ.get('ALIYUN_LOG_SAMPLE_ACCESSKEY'),
+                         'project': 'elephantbar',
+                         'log_store': "elephant"}
+
+    },
+    'loggers': {
+        'django': {
+            'handlers': ['console'],
+            'propagate': True}}
+}
+
+__app_logging = {'handlers': ['console', 'sls_handler'],
+                 'level': log_level,
+                 'propagate': True}
+
+START_APP.append('elephant')
+for app in START_APP:
+    LOGGING.get('loggers').update({app: __app_logging})
